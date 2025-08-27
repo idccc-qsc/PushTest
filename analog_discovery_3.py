@@ -2,7 +2,6 @@ from ctypes import *
 from dwfconstants import *  # Import all constants from dwfconstants
 import time
 from base_digilent import BaseDigilentDevice
-# from src.shared.instr_drivers.instruments.digital_analyzer.digilent.waveforms_sdk import dwf
 
 class AnalogDiscovery3(BaseDigilentDevice):
     def __init__(self):
