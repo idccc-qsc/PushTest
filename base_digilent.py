@@ -11,18 +11,24 @@ class BaseDigilentDevice(ABC):
         self.load_lib()
     
     # Load the DWF library
-    def load_lib(self):
+    @classmethod
+    def load_library(cls):
+        if cls.LibraryLoaded:
+            return
+        
         if sys.platform.startswith("win"):
-            self.dwf = cdll.dwf
+            cls._dwf = cdll.dwf
         elif sys.platform.startswith("darwin"):
-            self.dwf = cdll.LoadLibrary("/Library/Frameworks/dwf.framework/dwf")
+            cls._dwf = cdll.LoadLibrary("/Library/Frameworks/dwf.framework/dwf")
         else:
-            self.dwf = cdll.LoadLibrary("libdwf.so")
-        if self.dwf is None:
+            cls._dwf = cdll.LoadLibrary("libdwf.so")
+        if cls._dwf is None:
             print("Failed to load dwf library")
             # utils.log_to_file("Failed to load dwf library")
             quit()  
-        # return self.dwf
+        else:
+            cls.LibraryLoaded = True
+    
     
     # Open device by serial number
     def open_device_by_sn(self, sn):
