@@ -2,6 +2,7 @@ from ctypes import *
 from dwfconstants import *  # Import all constants from dwfconstants
 import time
 from base_digilent import BaseDigilentDevice
+from collections import namedtuple
 
 class AnalogDiscovery3(BaseDigilentDevice):
     def __init__(self):
@@ -9,6 +10,7 @@ class AnalogDiscovery3(BaseDigilentDevice):
         self.model = "Analog Discovery 3"
         self.AI = AI(self)
         self.AO = AO(self)
+        self.I2C = I2C(self)
 
     # configure the DIO pins for I2C communication
     def configure_i2c(self, do_scl_index, do_sda_index, i2c_clock_frequency):
@@ -193,6 +195,288 @@ class AO():
 
         return True
     
+
+
+
+class I2C():
+    #region Properties
+
+    #region Rate
+    @property
+    def Rate(self) -> float:
+        return self._rate
+    
+    @Rate.setter
+    @AnalogDiscovery3.LogPropertySet
+    def Rate(self, bitRate: float):
+        self._rate = bitRate
+
+        rate = c_double(bitRate)
+        self._dwf.FDwfDigitalI2cRateSet(self._ad3._hdwf, rate)
+    #endregion
+
+    #region Timeout
+    @property
+    def Timeout(self) -> float:
+        return self._timeout
+    
+    @Timeout.setter
+    @AnalogDiscovery3.LogPropertySet
+    def Timeout(self, duration_sec: float):
+        self._timeout = duration_sec
+
+        timeout_sec = c_double(duration_sec)
+        self._dwf.FDwfDigitalI2cTimeoutSet(self._ad3._hdwf, timeout_sec)
+    #endregion
+
+    #region EnNakOnRead
+    @property
+    def EnNakOnRead(self) -> bool:
+        return self._enNakOnRead
+    
+    @EnNakOnRead.setter
+    @AnalogDiscovery3.LogPropertySet
+    def EnNakOnRead(self, value: bool):
+        self._enNakOnRead = value
+
+        val = c_int(value)
+        self._dwf.FDwfDigitalI2cReadNakSet(self._ad3._hdwf, val)
+    #endregion
+
+    #region EnableClockStretching
+    @property
+    def EnableClockStretching(self) -> bool:
+        return self._enClockStretching
+    
+    @EnableClockStretching.setter
+    @AnalogDiscovery3.LogPropertySet
+    def EnableClockStretching(self, value: bool):
+        self._enClockStretching = value
+
+        val = c_int(value)
+        self._dwf.FDwfDigitalI2cStretchSet(self._ad3._hdwf, val)
+    #endregion
+
+    #region SCL
+    @property
+    def SCL(self) -> int:
+        return self._scl
+    
+    @SCL.setter
+    @AnalogDiscovery3.LogPropertySet
+    def SCL(self, dioChannel: int):
+        self._scl = dioChannel
+
+        channel = c_int(dioChannel)
+        self._dwf.FDwfDigitalI2cSclSet(self._ad3._hdwf, channel)
+    #endregion
+
+    #region SDA
+    @property
+    def SDA(self) -> int:
+        return self._sda
+    
+    @SDA.setter
+    @AnalogDiscovery3.LogPropertySet
+    def SDA(self, dioChannel: int):
+        self._sda = dioChannel
+        
+        channel = c_int(dioChannel)
+        self._dwf.FDwfDigitalI2cSdaSet(self._ad3._hdwf, channel)
+    #endregion
+
+
+
+    #endregion
+
+    I2cMessage = namedtuple('I2cMessage', ['ACK', 'Readback', 'Details'])
+
+    def __init__(self, ad3: AnalogDiscovery3):
+        self.name = "I2C"
+
+        self._ad3 = ad3                 
+        self._dwf = type(ad3)._dwf       # API Interface ???
+
+
+        self._scl = None
+        self._sda = None
+        self._rate = None
+        self._timeout = None
+        self._enNakOnRead = None
+        self._enClockStretching = None
+
+    def LogI2C(func):
+        def wrapper(*args, **kwargs):
+            obj = args[0]
+            logger = obj._ad3.logger
+
+            i2cMessage = func(*args, **kwargs)
+
+            if logger is not None:
+                logger.debug(f"{obj._ad3.name}:\t{i2cMessage.Details}")
+            
+            return i2cMessage
+        return wrapper
+
+
+    def Reset(self):
+        self._dwf.FDwfDigitalI2cReset(self._ad3._hdwf)
+        self._scl = None
+        self._sda = None
+        self._rate  = None
+        self._timeout = None
+        self._enNakOnRead = None
+        self._enClockStretching = None
+    
+    def Clear(self) -> bool:
+        iNak = c_int()
+        self._dwf.FDwfDigitalI2cClear(self._ad3._hdwf, byref(iNak))
+
+        return bool(iNak)
+    
+
+    @LogI2C
+    def Write(self, address: int, register: int = None, values: int | list[int] = None) -> I2cMessage:
+        """I2C write.
+            - Single
+            - Repeated"""
+        
+
+        ## Exception handling
+        if not isinstance(address, int):
+            raise TypeError(f"Address must be an integer.")
+        
+        if not isinstance(register, (int | None)):
+            raise TypeError(f"Register must be an integer or None.")
+        
+        if isinstance(values, list):
+            if not all(isinstance(val, int) for val in values):
+                raise TypeError("Values must be an integer, a list of integers, or None.")
+        elif not isinstance(values, (int | None)):
+            raise TypeError("Values must be an integer, a list of integers, or None.")
+        
+
+        ### Basic setup
+        pNak = c_int()
+        cAddress = c_ubyte(address)
+
+        if register is None:
+            cTx = c_int(0)
+            rgTx = (cTx.value * c_ubyte)()
+
+        else:
+            if values is None:
+                cTx = c_int(1)
+                rgTx = (cTx.value * c_ubyte)(register)
+
+            elif isinstance(values, int):
+                cTx = c_int(2)
+                rgTx = (cTx.value * c_ubyte)(register, values)
+
+            elif isinstance(values, list):
+                cTx = c_int(1 + len(values))
+                rgTx = (cTx.value * c_ubyte)(register, *values)
+
+
+        ### Perform the write
+        self._dwf.FDwfDigitalI2cWrite(self._ad3._hdwf, cAddress, rgTx, cTx, byref(pNak))
+
+        readback = None
+        notAck = bool(pNak)
+        ack = not notAck
+
+        addressStr = f"0x{format(address, '02x')}"
+        registerStr = "" if register is None else f":0x{format(register, '02x')}"
+        valuesStr = "" if values is None else ":" + ", ".join(f"0x{format(val, '02x')}" for val in values)
+
+        if ack:
+            textMsg = f"{addressStr}[W]{registerStr}{valuesStr}"
+        else:
+            textMsg = f"{addressStr}[W] (NAK){registerStr}"
+
+        msg = self.I2cMessage(ack, readback, textMsg)
+        return msg
+
+    @LogI2C
+    def Read(self, address: int, register: int, count=1) -> I2cMessage:
+        """I2C Read
+        - Single
+        - Repeated"""
+
+
+        ### Exception handling
+        if not isinstance(address, int):
+            raise TypeError(f"Address must be an integer.")
+        if not isinstance(register, (int | None)):
+            raise TypeError(f"Register must be an integer or None.")
+        if count < 0:
+            raise ArgumentError(f"Count must be greater than or equal to 0.")
+        
+        
+
+        ### Basic setup
+        pNak = c_int()
+        cAddress = c_ubyte(address)
+
+        ### Repeated start reads (https://www.i2c-bus.org/auto-increment/)
+        if register is None:
+            cTx = c_int(0)
+            rgTx = (cTx.value * c_ubyte)()
+        else:
+            cTx = c_int(1)
+            rgTx = (cTx.value * c_ubyte)(register)
+
+        cRx = c_int(count)
+        rgRx = (cRx.value * c_ubyte)()
+
+        ### Write to the register and readback
+        self._dwf.FDwfDigitalI2cWriteRead(self._ad3._hdwf, address, rgTx, cTx, rgRx, cRx, byref(pNak))
+
+        readback = list(rgRx)
+        notAck = bool(pNak)
+        ack = not notAck
+
+        addressStr = f"0x{format(address, '02x')}"
+        registerStr = "" if register is None else f":0x{format(register, '02x')}"
+        valuesStr = "" if readback is None else ":" + ", ".join(f"0x{format(val, '02x')}" for val in readback)
+
+        if ack:
+            textMsg = f"{addressStr}[R]{registerStr}{valuesStr}"
+        else:
+            textMsg = f"{addressStr}[R] (NAK){registerStr}"
+
+        msg = self.I2cMessage(ack, readback, textMsg)
+        return msg
+
+    # configure the DIO pins for I2C communication
+    def Configure(self, sclPin, sdaPin, clockFreq, enClkStretch):
+        iNak = c_int()
+        self.Reset()
+
+        self.SCL = sclPin
+        self.SDA = sdaPin
+        self.Rate = clockFreq
+        self.EnableClockStretching = enClkStretch
+
+        isBusFree = self.Clear()
+        
+        return isBusFree
+
+
+    def FindDevices(self, addresses: range = None):
+        addresses = list(range(0, 0x7F)) if addresses is None else addresses
+        addresses = [address << 1 for address in addresses]
+
+        validAddresses = []
+        for address in addresses:
+            ack, readback, details = self.Write(address)
+
+            if ack:
+                validAddresses.append(address)
+
+        return validAddresses
+
+
 
 if __name__ == "__main__":
     AD3 = AnalogDiscovery3()
