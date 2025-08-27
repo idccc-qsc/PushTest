@@ -7,31 +7,36 @@ from collections import namedtuple
 class AnalogDiscovery3(BaseDigilentDevice):
     def __init__(self):
         super().__init__()
+
+        self.name = ""
         self.model = "Analog Discovery 3"
+
         self.AI = AI(self)
         self.AO = AO(self)
         self.I2C = I2C(self)
 
-    # configure the DIO pins for I2C communication
-    def configure_i2c(self, do_scl_index, do_sda_index, i2c_clock_frequency):
-        iNak = c_int()
-        self.dwf.FDwfDigitalI2cReset()
-        self.dwf.FDwfDigitalI2cStretchSet(self.hdwf, c_int(1)) # clock stretching
-        self.dwf.FDwfDigitalI2cRateSet(self.hdwf, c_double(i2c_clock_frequency)) # 400 kHz
-        self.dwf.FDwfDigitalI2cSclSet(self.hdwf, c_int(do_scl_index)) # SCL 
-        self.dwf.FDwfDigitalI2cSdaSet(self.hdwf, c_int(do_sda_index)) # SDA 
-        # dwf.FDwfDigitalI2cStretchSet(hdwf, c_int(1)) # clock stretching
-        self.dwf.FDwfDigitalI2cClear(self.hdwf, byref(iNak))
-        
-        if iNak.value == 0:
-            #print("Reading I2C bus error. Check the pull-ups.")
-            return False
-        time.sleep(1)
-        return True
+        self.logger = None
+
+    def LogPropertySet(func):
+        def wrapper(*args, **kwargs):
+            obj = args[0]
+            val = args[1]
+
+            logger = obj._ad3.logger
+
+            if logger is not None:
+                logger.debug(f"Setting {obj._ad3.name}{obj.name}.{func.__name__} to {val}.")
+            
+            func(*args, **kwargs)
+            
+        return wrapper
+
+
        
 class AI():
     def __init__(self, ad3: AnalogDiscovery3):
-        self._ad3 = ad3                
+        self._ad3 = ad3       
+        self._dwf = type(ad3)._dwf       # API Interface ???         
     
     def configure_scope_single(self, channel, sampling_frequency, range=25, n_samples=16384):
         """
@@ -49,11 +54,11 @@ class AI():
 
         n_samples: number of samples to capture, 16384 max when using two channels, 32768 max when using one channel
         """
-        self._ad3.dwf.FDwfAnalogInFrequencySet(self._ad3.hdwf, c_double(sampling_frequency))
-        self._ad3.dwf.FDwfAnalogInBufferSizeSet(self._ad3.hdwf, c_int(n_samples))
-        self._ad3.dwf.FDwfAnalogInChannelEnableSet(self._ad3.hdwf, c_int(channel), c_int(True))
-        self._ad3.dwf.FDwfAnalogInChannelRangeSet(self._ad3.hdwf, c_int(channel), c_double(range))
-        self._ad3.dwf.FDwfAnalogInChannelFilterSet(self._ad3.hdwf, c_int(channel), filterDecimate)
+        self._dwf.FDwfAnalogInFrequencySet(self._ad3._hdwf, c_double(sampling_frequency))
+        self._dwf.FDwfAnalogInBufferSizeSet(self._ad3._hdwf, c_int(n_samples))
+        self._dwf.FDwfAnalogInChannelEnableSet(self._ad3._hdwf, c_int(channel), c_int(True))
+        self._dwf.FDwfAnalogInChannelRangeSet(self._ad3._hdwf, c_int(channel), c_double(range))
+        self._dwf.FDwfAnalogInChannelFilterSet(self._ad3._hdwf, c_int(channel), filterDecimate)
 
         self._numSamples = n_samples
         self._samplingFrequency = sampling_frequency
@@ -84,7 +89,7 @@ class AI():
         """
         Start the oscilloscope
         """
-        self._ad3.dwf.FDwfAnalogInConfigure(self._ad3.hdwf, c_int(1), c_int(1))
+        self._dwf.FDwfAnalogInConfigure(self._ad3._hdwf, c_int(1), c_int(1))
 
         return True
 
@@ -92,7 +97,7 @@ class AI():
         """
         Stop the oscilloscope
         """
-        self._ad3.dwf.FDwfAnalogInConfigure(self._ad3.hdwf, c_int(0), c_int(0))
+        self._dwf.FDwfAnalogInConfigure(self._ad3._hdwf, c_int(0), c_int(0))
 
         return True
 
@@ -105,12 +110,12 @@ class AI():
         rgdSamples = (c_double * self._numSamples)()
 
         while True:
-            self._ad3.dwf.FDwfAnalogInStatus(self._ad3.hdwf, c_int(1), byref(sts))
+            self._dwf.FDwfAnalogInStatus(self._ad3._hdwf, c_int(1), byref(sts))
             if sts.value == DwfStateDone.value :
                 break
             time.sleep(0.1)
             
-        self._ad3.dwf.FDwfAnalogInStatusData(self._ad3.hdwf, channel, rgdSamples, self._numSamples) # get data
+        self._dwf.FDwfAnalogInStatusData(self._ad3._hdwf, channel, rgdSamples, self._numSamples) # get data
         
         return rgdSamples
 
@@ -124,19 +129,20 @@ class AI():
         rgdSamples2 = (c_double * self._numSamples)()
 
         while True:
-            self._ad3.dwf.FDwfAnalogInStatus(self._ad3.hdwf, c_int(1), byref(sts))
+            self._dwf.FDwfAnalogInStatus(self._ad3._hdwf, c_int(1), byref(sts))
             if sts.value == DwfStateDone.value :
                 break
             time.sleep(0.1)
 
-        self._ad3.dwf.FDwfAnalogInStatusData(self._ad3.hdwf, 0, rgdSamples1, self._numSamples) # get data
-        self._ad3.dwf.FDwfAnalogInStatusData(self._ad3.hdwf, 1, rgdSamples2, self._numSamples) # get data
+        self._dwf.FDwfAnalogInStatusData(self._ad3._hdwf, 0, rgdSamples1, self._numSamples) # get data
+        self._dwf.FDwfAnalogInStatusData(self._ad3._hdwf, 1, rgdSamples2, self._numSamples) # get data
 
         return rgdSamples1, rgdSamples2
 
 class AO():
     def __init__(self, ad3: AnalogDiscovery3):
         self._ad3 = ad3
+        self._dwf = type(ad3)._dwf       # API Interface ???    
 
     # AD3 - Function Generator 
     def generate_pattern_fgen(self, channel, function, offset, frequency=2e06, amplitude=2, symmetry=50, wait=0, run_time=0, repeat=0, data=[]):
@@ -156,33 +162,33 @@ class AO():
         """
         # enable channel
         channel = c_int(channel)
-        self._ad3.dwf.FDwfAnalogOutNodeEnableSet(self._ad3.hdwf, channel, AnalogOutNodeCarrier, c_bool(True))
+        self._dwf.FDwfAnalogOutNodeEnableSet(self._ad3._hdwf, channel, AnalogOutNodeCarrier, c_bool(True))
         # set function type
-        self._ad3.dwf.FDwfAnalogOutNodeFunctionSet(self._ad3.hdwf, channel, AnalogOutNodeCarrier, function)
+        self._dwf.FDwfAnalogOutNodeFunctionSet(self._ad3._hdwf, channel, AnalogOutNodeCarrier, function)
         # load data if the function type is custom
         if function == funcCustom:
             data_length = len(data)
             buffer = (c_double * data_length)()
             for index in range(0, len(buffer)):
                 buffer[index] = c_double(data[index])
-            self._ad3.dwf.FDwfAnalogOutNodeDataSet(self._ad3.hdwf, channel, AnalogOutNodeCarrier, buffer, c_int(data_length))
+            self._dwf.FDwfAnalogOutNodeDataSet(self._ad3._hdwf, channel, AnalogOutNodeCarrier, buffer, c_int(data_length))
 
         # set frequency
-        self._ad3.dwf.FDwfAnalogOutNodeFrequencySet(self._ad3.hdwf, channel, AnalogOutNodeCarrier, c_double(frequency))
+        self._dwf.FDwfAnalogOutNodeFrequencySet(self._ad3._hdwf, channel, AnalogOutNodeCarrier, c_double(frequency))
         # set amplitude or DC voltage
-        self._ad3.dwf.FDwfAnalogOutNodeAmplitudeSet(self._ad3.hdwf, channel, AnalogOutNodeCarrier, c_double(amplitude))
+        self._dwf.FDwfAnalogOutNodeAmplitudeSet(self._ad3._hdwf, channel, AnalogOutNodeCarrier, c_double(amplitude))
         # set offset
-        self._ad3.dwf.FDwfAnalogOutNodeOffsetSet(self._ad3.hdwf, channel, AnalogOutNodeCarrier, c_double(offset))
+        self._dwf.FDwfAnalogOutNodeOffsetSet(self._ad3._hdwf, channel, AnalogOutNodeCarrier, c_double(offset))
         # set symmetry
-        self._ad3.dwf.FDwfAnalogOutNodeSymmetrySet(self._ad3.hdwf, channel, AnalogOutNodeCarrier, c_double(symmetry))
+        self._dwf.FDwfAnalogOutNodeSymmetrySet(self._ad3._hdwf, channel, AnalogOutNodeCarrier, c_double(symmetry))
         # set running time limit
-        self._ad3.dwf.FDwfAnalogOutRunSet(self._ad3.hdwf, channel, c_double(run_time))
+        self._dwf.FDwfAnalogOutRunSet(self._ad3._hdwf, channel, c_double(run_time))
         # set wait time before start
-        self._ad3.dwf.FDwfAnalogOutWaitSet(self._ad3.hdwf, channel, c_double(wait))
+        self._dwf.FDwfAnalogOutWaitSet(self._ad3._hdwf, channel, c_double(wait))
         # set number of repeating cycles
-        self._ad3.dwf.FDwfAnalogOutRepeatSet(self._ad3.hdwf, channel, c_int(repeat))
+        self._dwf.FDwfAnalogOutRepeatSet(self._ad3._hdwf, channel, c_int(repeat))
         # start
-        self._ad3.dwf.FDwfAnalogOutConfigure(self._ad3.hdwf, channel, c_bool(True))
+        self._dwf.FDwfAnalogOutConfigure(self._ad3._hdwf, channel, c_int(1))
         return
     
     def disable_fgen(self, channel=-1):
@@ -191,12 +197,12 @@ class AO():
         
         channel: -1 for all channels, 0 for first channel, 1 for second channel
         """
-        self._ad3.dwf.FDwfAnalogOutConfigure(self._ad3.hdwf, c_int(channel), c_int(False))
+        self._dwf.FDwfAnalogOutConfigure(self._ad3._hdwf, c_int(channel), c_int(False))
 
         return True
     
 
-
+    
 
 class I2C():
     #region Properties
@@ -387,7 +393,12 @@ class I2C():
 
         addressStr = f"0x{format(address, '02x')}"
         registerStr = "" if register is None else f":0x{format(register, '02x')}"
-        valuesStr = "" if values is None else ":" + ", ".join(f"0x{format(val, '02x')}" for val in values)
+        if values is None:
+            valuesStr = ""
+        elif isinstance(values, int):
+            valuesStr = f":0x{format(values, '02x')}"
+        elif isinstance(values, list):
+            valuesStr = ":" + ", ".join(f"0x{format(val, '02x')}" for val in values)
 
         if ack:
             textMsg = f"{addressStr}[W]{registerStr}{valuesStr}"
@@ -478,9 +489,9 @@ class I2C():
 
 
 
+
 if __name__ == "__main__":
     AD3 = AnalogDiscovery3()
-    AD3.open_device_default()
-    # AD3.AO.generate_pattern_fgen(2, funcSine, 0, 1000, 1)
-    input("Press Enter to continue...")
-    AD3.close_device()
+    AD3.open_by_default()
+    # devices = AD3.I2C.FindDevices()
+    AD3.close()
