@@ -4,6 +4,8 @@ import time
 from base_digilent import BaseDigilentDevice
 from collections import namedtuple
 
+### BLAH BLAH BLAH
+
 class AnalogDiscovery3(BaseDigilentDevice):
     def __init__(self):
         super().__init__()
